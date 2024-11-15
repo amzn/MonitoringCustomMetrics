@@ -1,0 +1,9 @@
+build
+.idea
+*.iml
+spark
+.DS_Store
+.coverage
+**/__pycache__/
+**/*.json
+**/*.egg-info/
