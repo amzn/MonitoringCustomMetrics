@@ -202,14 +202,150 @@ The output files will be available in the "local_output" folder after the execut
 
 # Running the package in SageMaker
 
-In order to use this package in a SageMaker Processing Job, you will need to:
+To use `MonitoringCustomMetrics` in a SageMaker Processing Job, you will need to:
 
+- Configure AWS CLI.
 - Containerize the code using Docker.
-- Create an ECR Repo for MonitoringCustomMetrics.
-- Upload the container to your ECR Repo.
-- Start a SageMaker Processing Job using the container image uploaded to your ECR Repo.
+- Create an ECR Repo for MonitoringCustomMetrics in your AWS account.
+- Create an IAM Role with Trust Relationship with SageMaker.
+- Create an S3 bucket that will contain the input and output files.
+- Start a SageMaker Processing Job.
 
-(More details are still pending).
+### Configure AWS CLI
+
+You will need to set up your AWS CLI. Choose the authentication method that best suits you: 
+https://docs.aws.amazon.com/cli/latest/userguide/getting-started-quickstart.html#getting-started-prereqs-keys
+
+### Containerize the code using Docker
+
+You can build the container using the following command:
+
+```
+docker build . --load
+```
+
+We need to identify the IMAGE_ID of our container. We can do so by running:
+
+```
+docker images
+```
+
+From the list, we should grab the most recent IMAGE_ID. We will use it in the next steps.
+
+### Create an ECR Repo for MonitoringCustomMetrics in your AWS account
+
+We need an ECR Repo where the container images will be uploaded.
+
+```
+aws ecr create-repository --repository-name <Repository Name> --region <AWS Region> --image-tag-mutability MUTABLE
+```
+
+Log in to ECR with AWS CLI:
+
+```
+aws ecr get-login-password --region <AWS Region> | docker login --username AWS --password-stdin <AWS Account ID>.dkr.ecr.<AWS Region>.amazonaws.com
+```
+
+Then we need to tag the image and push it to ECR. The "image tag" will be used to identify the container. You can use "MonitoringCustomMetrics" or any other name you prefer:
+
+```
+docker tag <Image Id> <AWS Account ID>.dkr.ecr.<AWS Region>.amazonaws.com/<Repository Name>:<Image Tag>
+
+docker push <AWS Account ID>.dkr.ecr.<AWS Region>.amazonaws.com/Repository Name>:<Image Tag>
+```
+
+### Create an IAM Role with Trust Relationship with SageMaker
+
+We need an IAM Role that has a trust relationship with SageMaker. We can create a trust policy file with this content:
+
+trust-policy.json
+```
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "",
+            "Effect": "Allow",
+            "Principal": {
+                "Service": "sagemaker.amazonaws.com"
+            },
+            "Action": "sts:AssumeRole"
+        }
+    ]
+}
+```
+
+Then we can create the role and attach the policy:
+
+```
+aws iam create-role --role-name <Role Name> --assume-role-policy-document file://trust-policy.json
+
+aws iam attach-role-policy --policy-arn arn:aws:iam::aws:policy/AmazonSageMakerFullAccess --role-name <Role Name>
+```
+
+### Create an S3 bucket that will contain the input and output files
+
+You can create a new S3 bucket through AWS Console or through AWS CLI.
+
+```
+aws s3api create-bucket --bucket <S3 Bucket Name> --create-bucket-configuration LocationConstraint=<AWS Region>
+```
+
+You can now create folders inside the bucket, and upload the necessary files to each:
+- input
+- output
+- baseline
+
+Now we need to update the bucket policy, so that the IAM Role we created can read/write to the bucket:
+
+bucket-policy.json
+```
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::<AWS Account ID>:role/<Role Name>"
+            },
+            "Action": "s3:*",
+            "Resource": "arn:aws:s3:::<S3 Bucket Name>/*"
+        }
+    ]
+}
+```
+
+Run the command to update the policy:
+
+```
+aws s3api put-bucket-policy --bucket <S3 Bucket Name> --policy file://bucket-policy.json
+```
+
+### Start a SageMaker Processing Job
+
+Once all the required resources have been created in your AWS Account, you can now launch a Processing Job with the following command:
+
+```
+aws sagemaker create-processing-job \
+	--processing-job-name <Name of the processing job> \
+	--app-specification ImageUri="<ECR Image URI>",ContainerEntrypoint="python","./src/monitoring_custom_metrics/main.py" \
+	--processing-resources 'ClusterConfig={InstanceCount=1,InstanceType="<Instance type to use>",VolumeSizeInGB=5}' \
+	--role-arn <ARN of the IAM Role we created> \
+	--environment analysis_type=DATA_QUALITY \
+	--processing-inputs='[{"InputName": "dataInput", "S3Input": {"S3Uri": "<S3 Path to your input location>","LocalPath":"/opt/ml/processing/input/data","S3InputMode":"File", "S3DataType":"S3Prefix"}}]' \
+	--processing-output-config 'Outputs=[{OutputName="report",S3Output={S3Uri="<S3 Path to your output location>",LocalPath="/opt/ml/processing/output",S3UploadMode="Continuous"}}]'
+```
+
+You should get a response from AWS CLI similar to:
+
+```
+{
+    "ProcessingJobArn": "arn:aws:sagemaker:<AWS Region>:<AWS Account ID>:processing-job/<Name of the processing job>"
+}
+```
+
+You can also see the SageMaker Processing Job in AWS Console. Once the job finishes, you will find the result files in the
+output location you specified in the "processing-output-config" parameter.
 
 # Available metrics
 

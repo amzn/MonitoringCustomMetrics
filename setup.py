@@ -10,7 +10,7 @@ def read(fname):
 
 setup(
     name="MonitoringCustomMetrics",
-    version="1.0.2",
+    version="1.0.4",
     description="Custom Metrics for ML Model Monitoring",
     long_description=read("README.md"),
     long_description_content_type="text/markdown",
